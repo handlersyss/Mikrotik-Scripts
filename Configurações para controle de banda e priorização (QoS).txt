@@ -1,0 +1,43 @@
+# Configuração de variáveis
+:global INTERFACE-WAN "ether1"  # Interface WAN (ajuste conforme sua configuração)
+:global INTERFACE-LAN "ether2"  # Interface LAN (ajuste conforme sua configuração)
+:global UPLOAD-MAX 10000       # Velocidade máxima de upload em kbps (10 Mbps)
+:global DOWNLOAD-MAX 50000     # Velocidade máxima de download em kbps (50 Mbps)
+
+# Limpar configurações existentes de mangle e queues
+/ip firewall mangle remove [find]
+/queue tree remove [find]
+
+# --- Marcação de pacotes no firewall (mangle) ---
+# Prioridade alta: VoIP (SIP e RTP) e SSH
+/ip firewall mangle
+add chain=prerouting dst-port=5060-5061 protocol=udp action=mark-connection new-connection-mark=voip_conn passthrough=yes comment="VoIP - SIP"
+add chain=prerouting connection-mark=voip_conn action=mark-packet new-packet-mark=voip_packet passthrough=no
+add chain=prerouting dst-port=10000-20000 protocol=udp action=mark-connection new-connection-mark=voip_conn passthrough=yes comment="VoIP - RTP"
+add chain=prerouting connection-mark=voip_conn action=mark-packet new-packet-mark=voip_packet passthrough=no
+add chain=prerouting dst-port=22 protocol=tcp action=mark-connection new-connection-mark=high_conn passthrough=yes comment="SSH"
+add chain=prerouting connection-mark=high_conn action=mark-packet new-packet-mark=high_packet passthrough=no
+
+# Prioridade média: Navegação web (HTTP/HTTPS)
+add chain=prerouting dst-port=80,443 protocol=tcp action=mark-connection new-connection-mark=web_conn passthrough=yes comment="Web"
+add chain=prerouting connection-mark=web_conn action=mark-packet new-packet-mark=web_packet passthrough=no
+
+# Prioridade baixa: Todo o resto (default)
+add chain=prerouting action=mark-connection new-connection-mark=low_conn passthrough=yes comment="Default"
+add chain=prerouting connection-mark=low_conn action=mark-packet new-packet-mark=low_packet passthrough=no
+
+# --- Configuração de Queue Tree para controle de banda ---
+/queue tree
+# Upload (saída pela WAN)
+add name="upload_total" parent=$INTERFACE-WAN max-limit=$UPLOAD-MAX packet-mark="" queue=default
+add name="upload_voip" parent=upload_total max-limit=$UPLOAD-MAX packet-mark=voip_packet priority=1 queue=default comment="VoIP - Alta prioridade"
+add name="upload_high" parent=upload_total max-limit=$UPLOAD-MAX packet-mark=high_packet priority=2 queue=default comment="SSH - Alta prioridade"
+add name="upload_web" parent=upload_total max-limit=($UPLOAD-MAX * 0.7) packet-mark=web_packet priority=4 queue=default comment="Web - Média prioridade"
+add name="upload_low" parent=upload_total max-limit=($UPLOAD-MAX * 0.5) packet-mark=low_packet priority=8 queue=default comment="Default - Baixa prioridade"
+
+# Download (entrada pela LAN)
+add name="download_total" parent=$INTERFACE-LAN max-limit=$DOWNLOAD-MAX packet-mark="" queue=default
+add name="download_voip" parent=download_total max-limit=$DOWNLOAD-MAX packet-mark=voip_packet priority=1 queue=default comment="VoIP - Alta prioridade"
+add name="download_high" parent=download_total max-limit=$DOWNLOAD-MAX packet-mark=high_packet priority=2 queue=default comment="SSH - Alta prioridade"
+add name="download_web" parent=download_total max-limit=($DOWNLOAD-MAX * 0.7) packet-mark=web_packet priority=4 queue=default comment="Web - Média prioridade"
+add name="download_low" parent=download_total max-limit=($DOWNLOAD-MAX * 0.5) packet-mark=low_packet priority=8 queue=default comment="Default - Baixa prioridade"
