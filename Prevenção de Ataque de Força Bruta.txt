@@ -1,0 +1,43 @@
+# Configuração de Firewall para Bloqueio de Tentativas Repetidas de SSH (Black List)
+
+/ip firewall filter
+add action=drop chain=input comment="Drop anyone in Black List (SSH)" src-address-list="Black List (SSH)"
+add action=jump chain=input comment="Jump to Black List (SSH) Chain" dst-port=22 jump-target="Black List (SSH) Chain" protocol=tcp
+add action=add-src-to-address-list address-list="Black List (SSH)" address-list-timeout=4w2d chain="Black List (SSH) Chain" comment="Transfer repeated attempts from Black List (SSH) Stage 3 to Black List (SSH)" connection-state=new src-address-list="Black List (SSH) Stage 3"
+add action=add-src-to-address-list address-list="Black List (SSH) Stage 3" address-list-timeout=1m chain="Black List (SSH) Chain" comment="Add Successive attempts to Black List (SSH) Stage 3" connection-state=new src-address-list="Black List (SSH) Stage 2"
+add action=add-src-to-address-list address-list="Black List (SSH) Stage 2" address-list-timeout=1m chain="Black List (SSH) Chain" comment="Add Successive attempts to Black List (SSH) Stage 2" connection-state=new src-address-list="Black List (SSH) Stage 1"
+add action=add-src-to-address-list address-list="Black List (SSH) Stage 1" address-list-timeout=1m chain="Black List (SSH) Chain" comment="Add initial attempt to Black List (SSH) Stage 1" connection-state=new
+add action=return chain="Black List (SSH) Chain" comment="Return from Black List (SSH) chain"
+
+/interface bridge
+add name=Bridge-LAN
+
+/interface bridge port
+add bridge=Bridge-LAN interface=ether2
+add bridge=Bridge-LAN interface=ether3
+add bridge=Bridge-LAN interface=ether4
+add bridge=Bridge-LAN interface=ether5
+
+/ip address
+add address=192.168.1.1/24 interface=Bridge-LAN network=192.168.1.0
+
+/ip pool
+add name=dhcp_pool ranges=192.168.1.2-192.168.1.254
+
+/ip dhcp-server
+add name=dhcp1 interface=Bridge-LAN address-pool=dhcp_pool lease-time=1d
+
+/ip dhcp-server network
+add address=192.168.1.0/24 gateway=192.168.1.1 dns-server=192.168.1.1
+
+/ip dns
+set servers=1.1.1.1,1.0.0.1 allow-remote-requests=yes
+
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=ether1
+
+/ip dhcp-client
+add interface=ether1 add-default-route=yes
+
+/system identity
+set name=Router-SSH-Blacklist
