@@ -1,0 +1,44 @@
+/system script
+add name=ToggleWGPeer policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source={
+  :local wgcheckip "LOCAL_IP_GATEWAY_WIREGUARD_HEADQUARTER"  # Substitua pelo IP real (ex.: 10.0.0.1)
+  :local endpointip "xxxyyy.sn.mynetname.net"                # Substitua pelo domínio ou IP do peer
+  :local wgInterface "wireguard1"                            # Nome da interface WireGuard (ajuste conforme sua config)
+  :local maxFails 3                                          # Número de falhas consecutivas antes de agir
+  :local pingCount 5                                         # Quantidade de pings por teste
+  :local delayTime 30s                                       # Tempo de espera entre desativar/reativar
+
+  # Verifica se a interface WireGuard está ativa
+  :if ([/interface wireguard get [find name=$wgInterface] disabled] = no) do={
+    # Contador de falhas persistente
+    :global wgFailCount
+    :if ([:typeof $wgFailCount] = "nothing") do={ :set wgFailCount 0 }
+
+    # Testa conectividade com ping
+    :local pingResult [/ping $wgcheckip interval=1 count=$pingCount]
+    :log info "WG Check: Ping to $wgcheckip returned $pingResult successes"
+
+    # Se o ping falhar completamente
+    :if ($pingResult = 0) do={
+      :set wgFailCount ($wgFailCount + 1)
+      :log warning "WG Fail Count: $wgFailCount/$maxFails for $wgcheckip"
+
+      # Se atingir o número máximo de falhas consecutivas
+      :if ($wgFailCount >= $maxFails) do={
+        :log error "WG Down: $wgcheckip unreachable. Restarting peer $endpointip"
+        /interface wireguard peers disable [find endpoint-address=$endpointip]
+        :delay $delayTime
+        /interface wireguard peers enable [find endpoint-address=$endpointip]
+        :log info "WG Restarted: Peer $endpointip re-enabled"
+        :set wgFailCount 0  # Reseta o contador após reiniciar
+      }
+    } else={
+      # Se o ping funcionar, reseta o contador de falhas
+      :if ($wgFailCount > 0) do={
+        :log info "WG Restored: $wgcheckip is reachable again"
+        :set wgFailCount 0
+      }
+    }
+  } else={
+    :log warning "WG Interface $wgInterface is disabled. Skipping check."
+  }
+}

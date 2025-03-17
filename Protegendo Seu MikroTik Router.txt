@@ -1,0 +1,51 @@
+# Configuração de Segurança para RouterOS
+# Otimizada para proteger o roteador contra acesso não autorizado
+
+# 1. Configurar Usuário Personalizado e Remover Admin
+/user
+add name=mysecureuser password=MyStrongP@ssw0rd group=full
+remove admin
+set 0 allowed-address=192.168.50.0/24  # Substitua pela sua sub-rede
+
+# 2. Desativar Serviços Inseguros
+/ip service
+disable telnet,ftp,www,www-ssl,api,api-ssl
+set ssh port=2200 address=192.168.50.0/24  # Porta SSH personalizada e restrição de IP
+set winbox address=192.168.50.0/24         # Restrição de IP para Winbox
+
+# 3. Desativar Acesso via MAC
+/tool mac-server
+set allowed-interface-list=none
+/tool mac-server mac-winbox
+set allowed-interface-list=none
+/tool mac-server ping
+set enabled=no
+
+# 4. Desativar Teste de Banda
+/tool bandwidth-server
+set enabled=no
+
+# 5. Configurar DNS Seguro
+/ip dns
+set allow-remote-requests=no
+
+# 6. Desativar Serviços Adicionais
+/ip proxy
+set enabled=no
+/ip socks
+set enabled=no
+/ip upnp
+set enabled=no
+/ip cloud
+set ddns-enabled=no update-time=no
+
+# 7. Configurar SSH Seguro
+/ip ssh
+set strong-crypto=yes
+regenerate-host-key  # Regenera as chaves SSH (reboot necessário)
+
+/system identity
+set name=SecureRouter
+
+# 8. Reboot Automático (após regeneração das chaves SSH)
+/system reboot

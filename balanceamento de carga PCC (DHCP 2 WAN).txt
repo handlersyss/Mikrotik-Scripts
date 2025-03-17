@@ -1,0 +1,72 @@
+# Configuração para MikroTik hAP ac² com RouterOS 7.3.1
+# Balanceamento de carga PCC com 2 WANs DHCP (ISP1 e ISP2, 300 Mbps down / 200 Mbps up)
+
+/interface bridge
+add name=Bridge-ALL-PORTs
+
+/interface bridge port
+add bridge=Bridge-ALL-PORTs interface=ether3
+add bridge=Bridge-ALL-PORTs interface=ether4
+add bridge=Bridge-ALL-PORTs interface=ether5
+
+/ip address
+add address=172.16.0.1/24 interface=Bridge-ALL-PORTs network=172.16.0.0
+
+/ip dns
+set servers=1.1.1.1,1.0.0.1 allow-remote-requests=yes
+
+/ip dhcp-client
+add interface=ether1 add-default-route=no use-peer-dns=no use-peer-ntp=no
+add interface=ether2 add-default-route=no use-peer-dns=no use-peer-ntp=no
+
+/ip pool
+add name=dhcp_pool ranges=172.16.0.2-172.16.0.254
+
+/ip dhcp-server
+add name=dhcp1 interface=Bridge-ALL-PORTs address-pool=dhcp_pool lease-time=1d
+
+/ip dhcp-server network
+add address=172.16.0.0/24 gateway=172.16.0.1 dns-server=172.16.0.1
+
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=ether1 src-address=172.16.0.0/24
+add action=masquerade chain=srcnat out-interface=ether2 src-address=172.16.0.0/24
+
+/routing table
+add name=via-ISP1 fib=yes
+add name=via-ISP2 fib=yes
+
+/ip firewall mangle
+add action=accept chain=prerouting dst-address=172.16.0.0/24 src-address=172.16.0.0/24
+add action=mark-connection chain=prerouting in-interface=Bridge-ALL-PORTs new-connection-mark=ISP1-Conn passthrough=yes per-connection-classifier=both-addresses:2/0
+add action=mark-connection chain=prerouting in-interface=Bridge-ALL-PORTs new-connection-mark=ISP2-Conn passthrough=yes per-connection-classifier=both-addresses:2/1
+add action=mark-routing chain=prerouting connection-mark=ISP1-Conn in-interface=Bridge-ALL-PORTs new-routing-mark=via-ISP1 passthrough=no
+add action=mark-routing chain=prerouting connection-mark=ISP2-Conn in-interface=Bridge-ALL-PORTs new-routing-mark=via-ISP2 passthrough=no
+add action=mark-connection chain=prerouting in-interface=ether1 new-connection-mark=ISP1-Conn passthrough=yes
+add action=mark-connection chain=prerouting in-interface=ether2 new-connection-mark=ISP2-Conn passthrough=yes
+add action=mark-routing chain=output connection-mark=ISP1-Conn new-routing-mark=via-ISP1 passthrough=no
+add action=mark-routing chain=output connection-mark=ISP2-Conn new-routing-mark=via-ISP2 passthrough=no
+
+/ip firewall filter
+add action=accept chain=input connection-state=established,related
+add action=accept chain=input in-interface=Bridge-ALL-PORTs
+add action=drop chain=input comment="Drop all other input traffic"
+add action=accept chain=forward in-interface=Bridge-ALL-PORTs out-interface-list=!Bridge-ALL-PORTs
+add action=accept chain=forward connection-state=established,related
+add action=drop chain=forward comment="Drop all other forward traffic"
+
+/ip route
+add distance=1 gateway=ether1 routing-table=via-ISP1
+add distance=1 gateway=ether2 routing-table=via-ISP2
+add distance=2 gateway=ether2 routing-table=via-ISP1
+add distance=2 gateway=ether1 routing-table=via-ISP2
+add distance=1 gateway=ether1 routing-table=main
+add distance=2 gateway=ether2 routing-table=main
+
+/system ntp client
+set enabled=yes
+/system ntp client servers
+add address=pool.ntp.org
+
+/system identity
+set name=Router-PCC-DHCP

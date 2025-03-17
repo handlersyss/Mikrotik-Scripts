@@ -1,0 +1,45 @@
+# Cloudflare Dynamic DNS script de atualização
+# Política necessária: ler, escrever, testar, política
+# Adicione este script ao agendador
+# Instale o DigiCert root CA ou desative o certificado de verificação
+# Configuração ---------------------------------------------------------------------------------------------------------------------
+
+:TOKEN local "__APITOKEN__"
+:ZONEID local "__ZONEIDENTIFIER__"
+:Local RECORDID "__RECORDIDENTIFIER__"
+:local RECORDNAME "__DNSRECORD__"
+:local WANIF "__WANINTERFACE__"
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+: global IP4NEW
+: IP4CUR global
+
+: url local "https://api.cloudflare.com/client/v4/zones/$ZONEID/dns_records/$RECORDID/"
+
+:if ([/interface get $WANIF value-name=running]) do={
+# Obtenha o IP público atual
+    :solicitação local [tool fetch url="https://ipv4.icanhazip.com" mode=https check-certificate=no output=user as-value]
+    :set IP4NEW [:pick ($requestip->"data") 0 ([:len ($requestip->"data")]-1)]
+# Verifique se o IP foi alterado
+    :if ($IP4NEW != $IP4CUR) do={
+        :log info "CF-DDNS: Public IP alterado para $IP4NEW, atualização"
+        :local cfapi [/tool fetch http-method=put mode=https url=$url check-certificate=no output=user as-value \
+            http-header-field="Autorização: Portador $TOKEN,Content-Type: application/json" \
+            http-data="{\"type\":\"A\",\"name\":\"$RECORDNAME\",\"content\":\"$IP4NEW\",\"ttl\":120,\"proxied\":false}"]
+        :set IP4CUR $IP4NEW
+        :log info "CF-DDNS: Host $RECORDNAME atualizado com IP $IP4CUR"
+    } else={
+        :log info "CF-DDNS: IP anterior $IP4NEW não alterado, desistindo"
+    }
+} else={
+    :log info "CF-DDNS: $WANIF não está atualmente em execução, desistindo"
+}
+
+
+* [Comando API para Lista Cloudflare Record ID] *
+
+curl -X OBTER "https://api.cloudflare.com/client/v4/zones/ZONE_ID/dns_records?name=SUB_DOMAIN" \
+     - H "X-Auth-Email: user@example.com" \
+     - H "X-Auth-Key: YOUR_API_KEY" \
+     - H "Tipo de Conteúdo: aplicação/json"
