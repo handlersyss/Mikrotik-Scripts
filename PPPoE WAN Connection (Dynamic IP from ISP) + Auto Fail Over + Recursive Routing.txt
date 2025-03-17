@@ -1,0 +1,67 @@
+# Configuração de 2 Conexões PPPoE WAN com Failover Automático e Roteamento Recursivo
+
+/ppp profile
+add name=Profile1 on-up=":local createRoute do={\r\
+    \n/log info message=\"Add route \$remoteAddress\"\r\
+    \n/ip route add dst-address=\$dstAddress gateway=\$remoteAddress scope=30 target-scope=10 comment=(\"D\".\$wan)\r\
+    \n/ip route add dst-address=0.0.0.0/0 gateway=\$gateway scope=30 target-scope=30 distance=\$distance check-gateway=ping comment=(\"D\".\$wan)\r\
+    \n}\r\
+    \n:local wanArr {\r\
+    \n {\"remoteAddress\"=\$\"remote-address\"; \"dstAddress\"=1.1.1.1/32; \"gateway\"=1.1.1.1; \"distance\"=1; \"wan\"=\"pppoe-out1\"};\r\
+    \n {\"remoteAddress\"=\$\"remote-address\"; \"dstAddress\"=8.8.8.8/32; \"gateway\"=8.8.8.8; \"distance\"=2; \"wan\"=\"pppoe-out2\"};\r\
+    \n}\r\
+    \n:local intf1 [/interface get \$interface]\r\
+    \n:foreach w in=\$wanArr do={\r\
+    \n if ((\$w->\"wan\") = (\$intf1->\"name\")) do={\r\
+    \n  \$createRoute remoteAddress=(\$w->\"remoteAddress\") dstAddress=(\$w->\"dstAddress\") gateway=(\$w->\"gateway\") distance=(\$w->\"distance\") wan=(\$w->\"wan\")\r\
+    \n }\r\
+    \n}" \
+on-down=":local removeRoute do={\r\
+    \n/ip route remove [find comment=\$wan]\r\
+    \n}\r\
+    \n:local gw [/ip route print as-value where gateway=\$\"remote-address\"]\r\
+    \n:if ([:len \$gw] > 0 && (\$gw->0->\"comment\") != \"\") do={\r\
+    \n \$removeRoute wan=(\$gw->0->\"comment\")\r\
+    \n}"
+
+/interface pppoe-client
+add name=pppoe-out1 interface=ether1 user=ppp1 password=senha1 profile=Profile1 add-default-route=no disabled=no
+add name=pppoe-out2 interface=ether2 user=ppp2 password=senha2 profile=Profile1 add-default-route=no disabled=no
+
+/interface bridge
+add name=Bridge-LAN
+
+/interface bridge port
+add bridge=Bridge-LAN interface=ether3
+add bridge=Bridge-LAN interface=ether4
+add bridge=Bridge-LAN interface=ether5
+
+/ip address
+add address=192.168.1.1/24 interface=Bridge-LAN network=192.168.1.0
+
+/ip pool
+add name=dhcp_pool ranges=192.168.1.2-192.168.1.254
+
+/ip dhcp-server
+add name=dhcp1 interface=Bridge-LAN address-pool=dhcp_pool lease-time=1d
+
+/ip dhcp-server network
+add address=192.168.1.0/24 gateway=192.168.1.1 dns-server=192.168.1.1
+
+/ip dns
+set servers=1.1.1.1,1.0.0.1 allow-remote-requests=yes
+
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=pppoe-out1
+add action=masquerade chain=srcnat out-interface=pppoe-out2
+
+/ip firewall filter
+add action=accept chain=input connection-state=established,related
+add action=accept chain=input in-interface=Bridge-LAN
+add action=drop chain=input comment="Drop all other input traffic"
+add action=accept chain=forward in-interface=Bridge-LAN out-interface-list=!Bridge-LAN
+add action=accept chain=forward connection-state=established,related
+add action=drop chain=forward comment="Drop all other forward traffic"
+
+/system identity
+set name=Router-PPPoE-Failover
