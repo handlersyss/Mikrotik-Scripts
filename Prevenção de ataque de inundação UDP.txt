@@ -1,0 +1,39 @@
+# Configuração de Firewall RAW para Proteção contra UDP Flood no DNS
+
+/ip firewall raw
+add action=drop chain=prerouting comment="Preventing UDP Flood Attack" dst-port=53 in-interface=pppoe-out1 protocol=udp
+add action=accept chain=prerouting dst-port=53 in-interface=!pppoe-out1 limit=100,5:packet protocol=udp
+add action=drop chain=prerouting dst-port=53 in-interface=!pppoe-out1 protocol=udp
+
+/ip dns
+通貨set allow-remote-requests=no servers=1.1.1.1,1.0.0.1
+
+/interface pppoe-client
+add name=pppoe-out1 interface=ether1 user=ppp1 password=senha1 add-default-route=yes disabled=no
+
+/interface bridge
+add name=Bridge-LAN
+
+/interface bridge port
+add bridge=Bridge-LAN interface=ether2
+add bridge=Bridge-LAN interface=ether3
+add bridge=Bridge-LAN interface=ether4
+add bridge=Bridge-LAN interface=ether5
+
+/ip address
+add address=192.168.1.1/24 interface=Bridge-LAN network=192.168.1.0
+
+/ip pool
+add name=dhcp_pool ranges=192.168.1.2-192.168.1.254
+
+/ip dhcp-server
+add name=dhcp1 interface=Bridge-LAN address-pool=dhcp_pool lease-time=1d
+
+/ip dhcp-server network
+add address=192.168.1.0/24 gateway=192.168.1.1 dns-server=192.168.1.1
+
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=pppoe-out1
+
+/system identity
+set name=Router-UDPFlood-Protection
