@@ -1,0 +1,54 @@
+# Configuração de 1 Conexão WAN DHCP com Failover Automático e Roteamento Recursivo
+
+# 1. Configurar Interface WAN como Cliente DHCP
+/ip dhcp-client
+add interface=ether1 add-default-route=no use-peer-dns=no use-peer-ntp=no script=":if (\$bound=1) do={\r\
+    \n/ip route add distance=1 gateway=\$\"gateway-address\" dst-address=8.8.8.8 scope=30 target-scope=10 comment=\"ISP1\"\r\
+    \n/ip route add distance=1 gateway=8.8.8.8 dst-address=0.0.0.0/0 check-gateway=ping scope=30 target-scope=30 comment=\"ISP1\"\r\
+    \n:log info \"ISP1 is up\"\r\
+    \n} else={\r\
+    \n/ip route remove [find comment=\"ISP1\"]\r\
+    \n:log warning \"ISP1 is down\"\r\
+    \n}"
+
+# 2. Configurar Bridge para LAN
+/interface bridge
+add name=Bridge-LAN
+
+/interface bridge port
+add bridge=Bridge-LAN interface=ether2
+add bridge=Bridge-LAN interface=ether3
+add bridge=Bridge-LAN interface=ether4
+add bridge=Bridge-LAN interface=ether5
+
+# 3. Configurar Endereços IP e DHCP para LAN
+/ip address
+add address=192.168.1.1/24 interface=Bridge-LAN network=192.168.1.0
+
+/ip pool
+add name=dhcp_pool ranges=192.168.1.2-192.168.1.254
+
+/ip dhcp-server
+add name=dhcp1 interface=Bridge-LAN address-pool=dhcp_pool lease-time=1d
+
+/ip dhcp-server network
+add address=192.168.1.0/24 gateway=192.168.1.1 dns-server=192.168.1.1
+
+/ip dns
+set servers=1.1.1.1,1.0.0.1 allow-remote-requests=yes
+
+# 4. Configurar NAT
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=ether1
+
+# 5. Configurar Firewall Básico
+/ip firewall filter
+add action=accept chain=input connection-state=established,related
+add action=accept chain=input in-interface=Bridge-LAN
+add action=drop chain=input comment="Drop all other input traffic"
+add action=accept chain=forward in-interface=Bridge-LAN out-interface=ether1
+add action=accept chain=forward connection-state=established,related
+add action=drop chain=forward comment="Drop all other forward traffic"
+
+/system identity
+set name=Router-DHCP-Failover
