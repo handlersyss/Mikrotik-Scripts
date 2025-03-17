@@ -1,0 +1,67 @@
+# Configuração de 2 Conexões PPPoE WAN com Failover usando Netwatch
+# ISP1 (pppoe-out1) como primário, ISP2 (pppoe-out2) como secundário
+
+# 1. Configurar Interfaces PPPoE
+/interface pppoe-client
+add name=pppoe-out1 interface=ether1 user=ppp1 password=senha1 add-default-route=no disabled=no
+add name=pppoe-out2 interface=ether2 user=ppp2 password=senha2 add-default-route=no disabled=no
+
+# 2. Configurar Bridge para LAN
+/interface bridge
+add name=Bridge-LAN
+
+/interface bridge port
+add bridge=Bridge-LAN interface=ether3
+add bridge=Bridge-LAN interface=ether4
+add bridge=Bridge-LAN interface=ether5
+
+# 3. Configurar Endereços IP e DHCP
+/ip address
+add address=192.168.1.1/24 interface=Bridge-LAN network=192.168.1.0
+
+/ip pool
+add name=dhcp_pool ranges=192.168.1.2-192.168.1.254
+
+/ip dhcp-server
+add name=dhcp1 interface=Bridge-LAN address-pool=dhcp_pool lease-time=1d
+
+/ip dhcp-server network
+add address=192.168.1.0/24 gateway=192.168.1.1 dns-server=192.168.1.1
+
+/ip dns
+set servers=1.1.1.1,1.0.0.1 allow-remote-requests=yes
+
+# 4. Configurar NAT
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=pppoe-out1
+add action=masquerade chain=srcnat out-interface=pppoe-out2
+
+# 5. Configurar Rotas
+/ip route
+add comment="To ISP1" distance=1 gateway=pppoe-out1 routing-table=main
+add comment="To ISP2" distance=2 gateway=pppoe-out2 routing-table=main
+add comment="Netwatch ISP1 (Google DNS)" distance=1 dst-address=8.8.8.8/32 gateway=pppoe-out1 routing-table=main
+add comment="Netwatch ISP2 (Quad9 DNS)" distance=1 dst-address=9.9.9.9/32 gateway=pppoe-out2 routing-table=main
+
+# 6. Configurar Netwatch para Failover
+/tool netwatch
+add host=8.8.8.8 interval=10s timeout=800ms \
+    up-script="/ip route enable [find dst-address=0.0.0.0/0 gateway=pppoe-out1]\r\n:log warning \"ISP1 is up\"" \
+    down-script="/ip route disable [find dst-address=0.0.0.0/0 gateway=pppoe-out1]\r\n:log error \"ISP1 is down\"" \
+    comment="Monitor ISP1"
+add host=9.9.9.9 interval=10s timeout=800ms \
+    up-script="/ip route enable [find dst-address=0.0.0.0/0 gateway=pppoe-out2]\r\n:log warning \"ISP2 is up\"" \
+    down-script="/ip route disable [find dst-address=0.0.0.0/0 gateway=pppoe-out2]\r\n:log error \"ISP2 is down\"" \
+    comment="Monitor ISP2"
+
+# 7. Configurar Firewall Básico
+/ip firewall filter
+add action=accept chain=input connection-state=established,related
+add action=accept chain=input in-interface=Bridge-LAN
+add action=drop chain=input comment="Drop all other input traffic"
+add action=accept chain=forward in-interface=Bridge-LAN out-interface-list=!Bridge-LAN
+add action=accept chain=forward connection-state=established,related
+add action=drop chain=forward comment="Drop all other forward traffic"
+
+/system identity
+set name=Router-Failover-PPPoE
