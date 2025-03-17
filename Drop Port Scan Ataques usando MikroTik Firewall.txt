@@ -1,0 +1,40 @@
+# Configuração de Firewall para Proteção contra Port Scan
+
+/ip firewall filter
+add action=add-src-to-address-list address-list="Port Scan" address-list-timeout=4w2d chain=forward comment="Preventing Port Scan" protocol=tcp psd=21,3s,3,1
+add action=add-src-to-address-list address-list="Port Scan" address-list-timeout=4w2d chain=input protocol=tcp psd=21,3s,3,1
+add action=drop chain=forward src-address-list="Port Scan"
+add action=drop chain=input src-address-list="Port Scan"
+
+/interface bridge
+add name=Bridge-LAN
+
+/interface bridge port
+add bridge=Bridge-LAN interface=ether2
+add bridge=Bridge-LAN interface=ether3
+add bridge=Bridge-LAN interface=ether4
+add bridge=Bridge-LAN interface=ether5
+
+/ip address
+add address=192.168.1.1/24 interface=Bridge-LAN network=192.168.1.0
+
+/ip pool
+add name=dhcp_pool ranges=192.168.1.2-192.168.1.254
+
+/ip dhcp-server
+add name=dhcp1 interface=Bridge-LAN address-pool=dhcp_pool lease-time=1d
+
+/ip dhcp-server network
+add address=192.168.1.0/24 gateway=192.168.1.1 dns-server=192.168.1.1
+
+/ip dns
+set servers=1.1.1.1,1.0.0.1 allow-remote-requests=yes
+
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=ether1
+
+/ip dhcp-client
+add interface=ether1 add-default-route=yes
+
+/system identity
+set name=Router-PortScan-Protection
