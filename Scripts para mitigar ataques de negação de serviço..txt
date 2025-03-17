@@ -1,0 +1,59 @@
+# Configuração de variáveis
+:global INTERFACE-WAN "ether1"  # Interface WAN (ajuste conforme sua configuração)
+:global INTERFACE-LAN "ether2"  # Interface LAN (ajuste conforme sua configuração)
+:global MAX-CONNECTIONS 100     # Máximo de conexões por IP
+:global BLOCK-TIME "10m"       # Tempo de bloqueio para IPs suspeitos (10 minutos)
+
+# Limpar configurações existentes relacionadas
+/ip firewall filter remove [find comment~"DDoS"]
+/ip firewall raw remove [find comment~"DDoS"]
+/ip firewall mangle remove [find comment~"DDoS"]
+
+# --- Regras de RAW para dropar tráfego malicioso antes do processamento ---
+/ip firewall raw
+# Drop de pacotes inválidos
+add chain=prerouting action=drop connection-state=invalid in-interface=$INTERFACE-WAN comment="DDoS - Drop Invalid Packets"
+
+# Proteção contra SYN Flood (limita novas conexões TCP)
+add chain=prerouting action=drop protocol=tcp tcp-flags=syn in-interface=$INTERFACE-WAN src-address-list=syn-flooders comment="DDoS - SYN Flood Protection"
+
+# Proteção contra UDP Flood
+add chain=prerouting action=drop protocol=udp in-interface=$INTERFACE-WAN src-address-list=udp-flooders comment="DDoS - UDP Flood Protection"
+
+# Proteção contra ICMP Flood (Ping Flood)
+add chain=prerouting action=drop protocol=icmp in-interface=$INTERFACE-WAN src-address-list=icmp-flooders comment="DDoS - ICMP Flood Protection"
+
+# --- Regras de Mangle para marcar IPs suspeitos ---
+/ip firewall mangle
+# Detectar SYN Flood (muitas conexões SYN por IP)
+add chain=prerouting action=mark-connection new-connection-mark=syn-check protocol=tcp tcp-flags=syn in-interface=$INTERFACE-WAN passthrough=yes comment="DDoS - Mark SYN"
+add chain=prerouting action=add-src-to-address-list address-list=syn-flooders address-list-timeout=$BLOCK-TIME connection-mark=syn-check connection-rate=0-500k in-interface=$INTERFACE-WAN passthrough=no comment="DDoS - List SYN Flooders"
+
+# Detectar UDP Flood (tráfego UDP excessivo)
+add chain=prerouting action=add-src-to-address-list address-list=udp-flooders address-list-timeout=$BLOCK-TIME protocol=udp in-interface=$INTERFACE-WAN connection-rate=0-1M passthrough=no comment="DDoS - List UDP Flooders"
+
+# Detectar ICMP Flood (muitos pings por IP)
+add chain=prerouting action=add-src-to-address-list address-list=icmp-flooders address-list-timeout=$BLOCK-TIME protocol=icmp in-interface=$INTERFACE-WAN connection-rate=0-100k passthrough=no comment="DDoS - List ICMP Flooders"
+
+# --- Regras de Filter para limitar conexões e proteger serviços ---
+/ip firewall filter
+# Aceitar tráfego estabelecido e relacionado (evita bloqueio de conexões legítimas)
+add chain=input action=accept connection-state=established,related in-interface=$INTERFACE-WAN comment="DDoS - Accept Established/Related"
+add chain=forward action=accept connection-state=established,related in-interface=$INTERFACE-WAN comment="DDoS - Accept Established/Related"
+
+# Limitar novas conexões por IP (proteção genérica contra floods)
+add chain=input action=drop connection-limit=$MAX-CONNECTIONS,32 in-interface=$INTERFACE-WAN comment="DDoS - Limit Connections per IP"
+
+# Proteger serviços essenciais (ex.: SSH, Winbox) - ajuste portas conforme necessário
+add chain=input action=accept protocol=tcp dst-port=22,8291 in-interface=$INTERFACE-WAN comment="DDoS - Allow SSH/Winbox"
+add chain=input action=drop in-interface=$INTERFACE-WAN comment="DDoS - Drop All Other Input"
+
+# --- Configuração de Universal Queue para limitar banda de atacantes ---
+/queue simple
+add name="ddos_limiter" target=$INTERFACE-WAN max-limit=256k/256k comment="DDoS - Limit Bandwidth for Attackers"
+add name="legit_traffic" target=$INTERFACE-LAN max-limit=($DOWNLOAD-MAX . "k/" . $UPLOAD-MAX . "k") comment="DDoS - Prioritize Legit Traffic"
+
+# Habilitar proteção contra ataques DoS no IP Settings
+/ip settings
+set tcp-syncookies=yes
+set rp-filter=strict
